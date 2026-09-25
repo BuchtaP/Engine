@@ -113,4 +113,17 @@ public:
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, (unsigned int)indices.size(), GL_UNSIGNED_INT, 0);
     }
+
+     float GetHeightAt(float worldX, float worldZ)
+    {
+        int x = (int)worldX;
+        int z = (int)worldZ;
+
+        if (x < 0 || x >= width || z < 0 || z >= height)
+            return 0.0f; // mimo mapu
+
+        // najdeme index vrcholu v poli 'vertices' - kazdy vrchol ma 6 hodnot (pozice+normala)
+        int index = (z * width + x) * 6;
+        return vertices[index + 1]; // Y souradnice (vyska)
+    }
 };

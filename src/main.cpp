@@ -4,6 +4,7 @@
 #include "Camera.h"
 #include <glm/gtc/type_ptr.hpp>
 #include "Terrain.h"
+#include "Sphere.h"
 
 Camera camera(glm::vec3(0.0f, 0.0f, 3.0f));
 
@@ -122,14 +123,10 @@ void main()
 {
     Direction = aPos;
 
-    // odstranime translaci z view matice - obloha se ma otacet s kamerou,
-    // ale nema se s ni posouvat (jinak by kamera "vylezla" z krychle)
     mat4 rotOnlyView = mat4(mat3(view));
 
     vec4 pos = projection * rotOnlyView * vec4(aPos, 1.0);
 
-    // trik: nastavime z na w, aby po deleni (perspective divide) vyslo z = 1.0
-    // tedy nejzazsi mozna hloubka - obloha je vzdy "za vsim ostatnim"
     gl_Position = pos.xyww;
 }
 )";
@@ -151,11 +148,48 @@ void main()
     float t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 skyColor = mix(horizonColor, zenithColor, t);
 
-    // jednoduchy zablesk slunce
     float sun = pow(max(dot(dir, normalize(sunDirection)), 0.0), 256.0);
     skyColor += vec3(1.0, 0.9, 0.7) * sun;
 
     FragColor = vec4(skyColor, 1.0);
+}
+)";
+
+// Sphere (hrac) shadery - stejny princip osvetleni jako teren, ale s "model" maticí,
+// protoze koule ma vrcholy kolem stredu (0,0,0) a musime ji posunout na pozici hrace
+const char* sphereVertexShaderSource = R"(
+#version 460 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+out vec3 Normal;
+
+void main()
+{
+    Normal = aNormal;
+    gl_Position = projection * view * model * vec4(aPos, 1.0);
+}
+)";
+
+const char* sphereFragmentShaderSource = R"(
+#version 460 core
+in vec3 Normal;
+out vec4 FragColor;
+
+void main()
+{
+    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
+    float diff = max(dot(normalize(Normal), lightDir), 0.0);
+
+    vec3 baseColor = vec3(0.9, 0.3, 0.2); // cervena/oranzova - hrac
+    vec3 ambient = baseColor * 0.3;
+    vec3 result = ambient + baseColor * diff;
+
+    FragColor = vec4(result, 1.0);
 }
 )";
 
@@ -298,10 +332,35 @@ int main()
     glDeleteShader(skyVertexShader);
     glDeleteShader(skyFragmentShader);
 
+    // Sphere (hrac) shadery
+    unsigned int sphereVertexShader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(sphereVertexShader, 1, &sphereVertexShaderSource, nullptr);
+    glCompileShader(sphereVertexShader);
+
+    unsigned int sphereFragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(sphereFragmentShader, 1, &sphereFragmentShaderSource, nullptr);
+    glCompileShader(sphereFragmentShader);
+
+    unsigned int sphereShaderProgram = glCreateProgram();
+    glAttachShader(sphereShaderProgram, sphereVertexShader);
+    glAttachShader(sphereShaderProgram, sphereFragmentShader);
+    glLinkProgram(sphereShaderProgram);
+
+    glDeleteShader(sphereVertexShader);
+    glDeleteShader(sphereFragmentShader);
+
    Terrain terrain;
 terrain.GenerateFromHeightmap("assets/heightmap/heightmap.png", 50.0f, 1.0f);
 
-camera.position = glm::vec3(terrain.width / 2.0f, 50.0f, 100.0f);
+    // Hrac (koule) - polomer a pocatecni pozice na povrchu terenu
+    float playerRadius = 1.5f;
+    Sphere playerSphere;
+    playerSphere.Generate(playerRadius, 20);
+
+    glm::vec3 playerPosition = glm::vec3(terrain.width / 2.0f, 0.0f, terrain.height / 2.0f);
+    playerPosition.y = terrain.GetHeightAt(playerPosition.x, playerPosition.z) + playerRadius;
+
+    // Kamera - pocatecni natoceni (pozice se dopocita kazdy snimek podle hrace)
 camera.yaw = 90.0f;
 camera.pitch = -20.0f;
 
@@ -340,6 +399,11 @@ camera.pitch = -20.0f;
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
+    // Nastaveni kamery pro treti osobu (za a nad hracem)
+    float cameraDistance = 10.0f;
+    float cameraHeight = 1.0f;
+    float playerSpeed = 6.0f;
+
     // Hlavni smycka
     while (!glfwWindowShouldClose(window))
     {
@@ -351,19 +415,30 @@ camera.pitch = -20.0f;
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
 
-            float cameraSpeed = 2.5f * deltaTime;
-if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-    camera.position += cameraSpeed * camera.GetFront();
-if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-    camera.position -= cameraSpeed * camera.GetFront();
-if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-    camera.position -= glm::normalize(glm::cross(camera.GetFront(), glm::vec3(0,1,0))) * cameraSpeed;
-if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-    camera.position += glm::normalize(glm::cross(camera.GetFront(), glm::vec3(0,1,0))) * cameraSpeed;
+        // Pohyb hrace (koule) - smer podle toho, kam se kamera divá (vodorovne, bez sklonu)
+        glm::vec3 forward = camera.GetFront();
+        forward.y = 0.0f;
+        forward = glm::normalize(forward);
+        glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
 
+        float moveDistance = playerSpeed * deltaTime;
 
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            playerPosition += forward * moveDistance;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            playerPosition -= forward * moveDistance;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            playerPosition -= right * moveDistance;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            playerPosition += right * moveDistance;
 
-        // Vykresleni (zatim jen vycisteni obrazovky)
+        // "Prilnuti" k terenu - koule vzdy sedi na povrchu
+        playerPosition.y = terrain.GetHeightAt(playerPosition.x, playerPosition.z) + playerRadius;
+
+        // Kamera sleduje hrace zezadu a shora, podle smeru pohledu (yaw/pitch z mysi)
+        camera.position = playerPosition - camera.GetFront() * cameraDistance + glm::vec3(0.0f, cameraHeight, 0.0f);
+
+        // Vykresleni
         glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -392,6 +467,21 @@ if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
         glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
         terrain.Draw();
+
+        // Vykresleni hrace (koule)
+        glUseProgram(sphereShaderProgram);
+
+        glm::mat4 sphereModel = glm::translate(glm::mat4(1.0f), playerPosition);
+
+        int sphereModelLoc = glGetUniformLocation(sphereShaderProgram, "model");
+        int sphereViewLoc = glGetUniformLocation(sphereShaderProgram, "view");
+        int sphereProjLoc = glGetUniformLocation(sphereShaderProgram, "projection");
+
+        glUniformMatrix4fv(sphereModelLoc, 1, GL_FALSE, glm::value_ptr(sphereModel));
+        glUniformMatrix4fv(sphereViewLoc, 1, GL_FALSE, glm::value_ptr(view));
+        glUniformMatrix4fv(sphereProjLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
+        playerSphere.Draw();
 
         // Vykresleni vody
         glUseProgram(waterShaderProgram);
@@ -423,6 +513,11 @@ if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
     glDeleteVertexArrays(1, &skyVAO);
     glDeleteBuffers(1, &skyVBO);
     glDeleteProgram(skyShaderProgram);
+
+    glDeleteVertexArrays(1, &playerSphere.VAO);
+    glDeleteBuffers(1, &playerSphere.VBO);
+    glDeleteBuffers(1, &playerSphere.EBO);
+    glDeleteProgram(sphereShaderProgram);
 
     glfwTerminate();
     return 0;
