@@ -1,6 +1,8 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
+#include "modules/config.h"
+#include "modules/debug.h"
 
 int main()
 {
@@ -17,7 +19,7 @@ int main()
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     // Vytvoreni okna
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "Zenith", glfwGetPrimaryMonitor(), nullptr);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "Zenith", nullptr(), nullptr);
     if (!window)
     {
         std::cerr << "Nepodarilo se vytvorit okno\n";
