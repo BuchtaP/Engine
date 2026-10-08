@@ -1,10 +1,8 @@
 #pragma once
 #include <GLFW/glfw3.h>
-#include "debug/imgui/imgui.h"
-#include "debug/imgui/backends/imgui_impl_glfw.h"
-#include "debug/imgui/backends/imgui_impl_opengl3.h"
+#include "debug.h"
 
-inline void initImGui(GLFWwindow* window)
+void initImGui(GLFWwindow* window)
 {
 IMGUI_CHECKVERSION();
 ImGui::CreateContext();
@@ -15,5 +13,5 @@ io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // IF using Docking Br
 
 // Setup Platform/Renderer backends
 ImGui_ImplGlfw_InitForOpenGL(window, true);          // Second param install_callback=true will install GLFW callbacks and chain to existing ones.
-ImGui_ImplOpenGL3_Init("#version 460");
+ImGui_ImplOpenGL3_Init(460);
 }
