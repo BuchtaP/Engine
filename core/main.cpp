@@ -3,6 +3,16 @@
 #include <iostream>
 #include "config/config.h"
 #include "modules/debug/debug.h"
+#include "modules/camera/camera.h"
+
+void framebuffer_size_callback(GLFWwindow* window, int width, int height)
+{
+    glViewport(0, 0, width, height);
+
+    if (height > 0)
+      camera.aspectRatio = (float)width / (float)height;
+        
+}
 
 int main()
 {
@@ -28,7 +38,8 @@ int main()
     }
 
     glfwMakeContextCurrent(window);
-
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    
     // Nacteni OpenGL funkci pres GLAD
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     {
@@ -36,9 +47,32 @@ int main()
         return -1;
     }
 
+    //Debugging
+    initImGui(window);
+    FPSCounter fpsCounter;
+    bool showDebugInfo = false;
+    bool prevF1Pressed = false;
+
     // Hlavni smycka
     while (!glfwWindowShouldClose(window))
     {
+
+        //FPS a  Imgui debug
+        double currentTime = glfwGetTime();
+        updateFPS(fpsCounter, currentTime);
+
+        const bool f1Pressed = glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS;
+        if (f1Pressed && !prevF1Pressed)
+        {
+            showDebugInfo = !showDebugInfo;   
+        }
+            prevF1Pressed = f1Pressed;
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();  
+        ImGui::NewFrame();
+        renderImGui(fpsCounter, showDebugInfo);
+
         // Vstup
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
             glfwSetWindowShouldClose(window, true);
@@ -46,6 +80,10 @@ int main()
         // Vykresleni (zatim jen vycisteni obrazovky)
         glClearColor(0.8f, 0.8f, 0.8f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        //render imgui
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
         glfwPollEvents();
